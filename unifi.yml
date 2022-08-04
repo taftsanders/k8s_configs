@@ -1,0 +1,225 @@
+#apiVersion: storage.k8s.io/v1
+#kind: StorageClass
+#metadata:
+#  name: unifi
+#provisioner: kubernetes.io/no-provisioner
+#volumeBindingMode: WaitForFirstConsumer
+#---
+#apiVersion: v1
+#kind: PersistentVolumeClaim
+#metadata:
+#  name: unifi-pv-claim
+#spec:
+#  storageClassName: unifi
+#  accessModes:
+#  - ReadWriteOnce
+#  resources:
+#    requests:
+#      storage: 20Gi
+#---
+#apiVersion: v1
+#kind: PersistentVolume
+#metadata:
+#  name: unifi-pv-volume
+#spec:
+#  persistentVolumeReclaimPolicy: Retain # Saves volume when deleting the PVClaim
+#  storageClassName: unifi
+#  capacity:
+#    storage: 5Gi
+#  accessModes:
+#    - ReadWriteOnce
+#  local:
+#    path: "/k3s-storage/unifi"
+#  nodeAffinity:
+#    required:
+#      nodeSelectorTerms:
+#      - matchExpressions:
+#        - key: kubernetes.io/hostname
+#          operator: In
+#          values: 
+#          - titan
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unifi-controller
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: unifi-controller
+      app.kubernetes.io/name: unifi
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: unifi-controller
+        app.kubernetes.io/name: unifi
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: titan
+      containers:
+      - env:
+        - name: UNIFI_HTTP_PORT
+          value: "8080"
+        - name: UNIFI_HTTPS_PORT
+          value: "8443"
+        - name: TZ
+          value: UTC
+        - name: RUNAS_UID0
+          value: "false"
+        - name: UNIFI_UID
+          value: "999"
+        - name: UNIFI_GID
+          value: "999"
+        image: tchellomello/unifi:5.12-latest 
+        imagePullPolicy: Always
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /status
+            port: https-gui
+            scheme: HTTPS
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        name: unifi
+        ports:
+        - containerPort: 8443
+          name: https-gui
+          protocol: TCP
+        - containerPort: 8080
+          name: controller
+          protocol: TCP
+        - containerPort: 10001
+          name: discovery
+          protocol: UDP
+        - containerPort: 3478
+          name: stun
+          protocol: UDP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /status
+            port: https-gui
+            scheme: HTTPS
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        resources: {}
+        securityContext:
+          capabilities:
+            add:
+            - SETFCAP
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /unifi 
+          name: data
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: data 
+        hostPath:
+          path: "/var/lib/nfs-share/k8s/unifi"
+          type: Directory
+#        persistentVolumeClaim:
+#          claimName: unifi-pv-claim
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: unifi-tcp
+  labels:
+    app.kubernetes.io/instance: unifi-controller
+    app.kubernetes.io/name: unifi
+  annotations:
+    metallb.universe.tf/allow-shared-ip: metal-lb-ip-space
+spec:
+  type: LoadBalancer
+  loadBalancerIP: 192.168.1.240
+  ports:
+  - name: controller
+    port: 8080
+    protocol: TCP
+  selector:
+    app.kubernetes.io/instance: unifi-controller
+    app.kubernetes.io/name: unifi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: unifi-udp
+  labels:
+    app.kubernetes.io/instance: unifi-controller
+    app.kubernetes.io/name: unifi
+  annotations:
+    metallb.universe.tf/allow-shared-ip: metal-lb-ip-space
+spec:
+  type: LoadBalancer
+  loadBalancerIP: 192.168.1.240
+  ports:
+  - name: discovery
+    port: 10001
+    protocol: UDP
+  - name: stun 
+    port: 3478
+    protocol: UDP
+  selector:
+    app.kubernetes.io/instance: unifi-controller
+    app.kubernetes.io/name: unifi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: unifi-gui
+  labels:
+    app.kubernetes.io/instance: unifi-controller
+    app.kubernetes.io/name: unifi
+spec:
+  ports:
+  - name: https-gui
+    port: 8443
+    protocol: TCP
+    targetPort: https-gui
+  selector:
+    app.kubernetes.io/instance: unifi-controller
+    app.kubernetes.io/name: unifi
+  type: NodePort
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: unifi
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`unifi.zircon.local`)
+      middlewares:
+        - name: https-only
+      kind: Rule
+      services:
+      - name: unifi-gui
+        port: 8443
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: unifi-https
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`unifi.zircon.local`)
+      kind: Rule
+      services:
+      - name: unifi-gui
+        port: 8443
+  tls:
+    secretName: zircon.local.certs

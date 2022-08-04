@@ -1,0 +1,121 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: codimd
+  name: codimd
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  selector:
+    matchLabels:
+      app: codimd
+  strategy:
+  #  rollingUpdate:
+  #    maxSurge: 25%
+  #    maxUnavailable: 25%
+  #  type: RollingUpdate
+    type: Recreate 
+  template:
+    metadata:
+      labels:
+        app: codimd
+    spec:
+      containers:
+      - env:
+        - name: CMD_DB_PASSWORD
+          value: "redhat"
+        - name: CMD_DB_URL
+          value: "postgres://codimd:codimdsecret123@postgres:5432/codimd"
+        - name: CMD_IMAGE_UPLOAD_TYPE
+          value: filesystem
+        - name: CMD_DOMAIN
+          value: "codimd.zircon.local"
+        - name: CMD_URL_ADDPORT
+          value: "false"
+        - name: CMD_ALLOW_GRAVATAR
+          value: "true"
+        - name: CMD_PROTOCOL_USESSL
+          value: "true"
+        - name: CMD_ALLOW_ANONYMOUS
+          value: "true"
+        - name: CMD_SESSION_SECRET
+          value: "HWiDIfHvTvKj3_zMwA6aAq" 
+        image: hackmdio/hackmd:latest
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /status
+            port: 3000
+            scheme: HTTP
+          initialDelaySeconds: 120
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        name: codimd
+        ports:
+        - containerPort: 3000
+          name: http
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /status
+            port: 3000
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        resources: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: codimd
+  name: codimd
+spec:
+  ports:
+  - port: 3000
+    protocol: TCP
+    targetPort: 3000
+#    nodePort: 30002
+  selector:
+    app: codimd
+#  type: NodePort
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: codimd
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`codimd.zircon.local`)
+      middlewares:
+        - name: https-only
+      kind: Rule
+      services:
+      - name: codimd
+        port: 3000
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: codimd-https
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`codimd.zircon.local`)
+      kind: Rule
+      services:
+      - name: codimd
+        port: 3000
+  tls: {}
+#    secretName: traefik-v2-default-bigboy-certs
+

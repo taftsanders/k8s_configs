@@ -1,0 +1,153 @@
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  #namespace: default # "namespace" omitted since ClusterRoles are not namespaced
+  name: nginx-ingress 
+rules:
+- apiGroups: [""] # "" indicates the core API group
+  resources: ["services"]
+  verbs: ["get", "watch", "list"]
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: nginx-ingress-binding
+subjects:
+- kind: ServiceAccount
+  name: default
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: my-ingress
+spec:
+  rules:
+  - host: gitssh.zircon.local
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: gitea-http-service
+          servicePort: 3000
+  - host: retro.zircon.local
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: kube-ops-view
+          servicePort: 8080
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: ingress-nginx
+spec:
+  type: LoadBalancer
+  selector:
+    app: ingress-nginx
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
+  - name: https
+    port: 443
+    targetPort: https
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: ingress-nginx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ingress-nginx
+  template:
+    metadata:
+      labels:
+        app: ingress-nginx
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+      - image: gcr.io/google_containers/nginx-ingress-controller:0.8.3
+        name: ingress-nginx
+        imagePullPolicy: Always
+        ports:
+          - name: http
+            containerPort: 80
+            protocol: TCP
+          - name: https
+            containerPort: 443
+            protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 10254
+            scheme: HTTP
+          initialDelaySeconds: 30
+          timeoutSeconds: 5
+        env:
+          - name: POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+          - name: POD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+        args:
+        - /nginx-ingress-controller
+        - --default-backend-service=$(POD_NAMESPACE)/nginx-default-backend
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: nginx-default-backend
+spec:
+  ports:
+  - port: 80
+    targetPort: http
+  selector:
+    app: nginx-default-backend
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: nginx-default-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx-default-backend
+  template:
+    metadata:
+      labels:
+        app: nginx-default-backend
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+      - name: default-http-backend
+        image: gcr.io/google_containers/defaultbackend:1.0
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 30
+          timeoutSeconds: 5
+        resources:
+          limits:
+            cpu: 10m
+            memory: 20Mi
+          requests:
+            cpu: 10m
+            memory: 20Mi
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP

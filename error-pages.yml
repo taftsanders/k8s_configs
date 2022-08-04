@@ -1,0 +1,55 @@
+---
+# Source: error-pages/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: error-pages
+  labels:
+    app.kubernetes.io/name: error-pages
+    helm.sh/chart: error-pages-0.1.0
+    app.kubernetes.io/instance: error-pages
+    app.kubernetes.io/managed-by: Helm
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: error-pages
+    app.kubernetes.io/instance: error-pages
+---
+# Source: error-pages/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: error-pages
+  labels:
+    app.kubernetes.io/name: error-pages
+    helm.sh/chart: error-pages-0.1.0
+    app.kubernetes.io/instance: error-pages
+    app.kubernetes.io/managed-by: Helm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: error-pages
+      app.kubernetes.io/instance: error-pages
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: error-pages
+        app.kubernetes.io/instance: error-pages
+    spec:
+      containers:
+        - name: error-pages
+          image: "guillaumebriday/traefik-custom-error-pages:latest"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          resources:
+            {}
+

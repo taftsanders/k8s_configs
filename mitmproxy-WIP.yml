@@ -1,0 +1,140 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mitmproxy
+  labels:
+    app: mitmproxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mitmproxy
+  template:
+    metadata:
+      labels:
+        app: mitmproxy
+    spec:
+      containers:
+        - name: mitmproxy
+          image: mitmproxy/mitmproxy:latest
+          imagePullPolicy: Always
+          tty: true
+          entrypoint: '/bin/sh -c "stty rows 24 cols 80 && mitmproxy -p8080 --mode reverse:http://proxy.zircon.local:8080/"'
+#
+#          env:
+#          - name: PGADMIN_DEFAULT_EMAIL
+#            valueFrom:
+#              secretKeyRef:
+#                name: pgadmin
+#                key: PGADMIN_DEFAULT_EMAIL
+# 
+#          - name: PGADMIN_DEFAULT_PASSWORD
+#            valueFrom:
+#              secretKeyRef:
+#                name: pgadmin
+#                key: PGADMIN_DEFAULT_PASSWORD
+# 
+#          - name: PGADMIN_LISTEN_PORT
+#            value: "80"
+# 
+#          - name: PGADMIN_PORT
+#            value: "80"
+# 
+#          volumeMounts:
+#            - name: pgadmin-nfs-data
+#              mountPath: /var/lib/pgadmin
+# 
+#      volumes:
+#      - name: pgadmin-nfs-data
+#        persistentVolumeClaim:
+#          claimName: pgadmin-claim
+#---
+#apiVersion: v1
+#kind: PersistentVolume
+#metadata:
+# name: pgadmin-nfs-data
+#spec:
+#  persistentVolumeReclaimPolicy: Retain
+#  storageClassName: nfs-kube
+#  capacity:
+#    storage: 5Gi
+#  accessModes:
+#   - ReadWriteMany
+#  nfs:
+#    server: 192.168.169.51
+#    path: "/volume1/k8s_global/pgadmin_data"
+#---
+#kind: PersistentVolumeClaim
+#apiVersion: v1
+#metadata:
+#  name: pgadmin-claim
+#spec:
+#  storageClassName: nfs-kube
+#  accessModes:
+#   - ReadWriteMany
+#  resources:
+#    requests:
+#      storage: 5Gi
+---
+apiVersion: v1  
+kind: Service
+metadata:
+  name: mitmproxy
+spec:
+  ports:
+  - name: http
+    targetPort: 8080
+    port: 8080
+    protocol: TCP
+  selector:
+    app: mitmproxy
+---
+apiVersion: v1  
+kind: Service
+metadata:
+  name: mitmproxy-webui
+spec:
+  ports:
+  - name: http
+    targetPort: 8081
+    port: 8081
+    protocol: TCP
+  selector:
+    app: mitmproxy
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: mitmproxy
+spec:
+  entryPoints:
+   - web
+  routes:
+    - match: Host(`mitmproxy.zircon.local`)
+#      middlewares:
+#        - name: https-only
+      kind: Rule
+      services:
+      - name: mitmproxy
+        port: 8080
+#---
+#apiVersion: traefik.containo.us/v1alpha1
+#kind: IngressRoute
+#metadata:
+#  name: pgadmin-https
+#spec:
+#  entryPoints:
+#   - websecure
+#  routes:
+#    - match: Host(`pgadmin.zircon.local`)
+#      middlewares:
+#        - name: traefik-fa
+#        - name: error-pages
+#        - name: error-pages-redirect
+#      kind: Rule
+#      services:
+#      - name: pgadmin
+#        port: 80
+#  tls:
+#    secretName: zircon.local.certs 

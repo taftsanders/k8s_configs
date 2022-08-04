@@ -1,0 +1,33 @@
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: awx-web
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`awx.zircon.local`)
+      middlewares:
+        - name: https-only
+      kind: Rule
+      services:
+      - name: awx
+        port: 8080
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: awx-web-https
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`awx.zircon.local`)
+      kind: Rule
+      services:
+      - name: awx
+        port: 8080
+  tls:
+    secretName: zircon.local.certs
+

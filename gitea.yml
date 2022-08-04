@@ -1,0 +1,133 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitea
+  labels:
+    app: gitea
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gitea
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: gitea
+    spec:
+      containers:
+        - name: gitea
+          image: gitea/gitea:1.13.2
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "600Mi"
+            limits:
+              cpu: "250m"
+              memory: "1024Mi"
+          volumeMounts:
+            - mountPath: /var/lib/nfs-share/k8s/gitea/
+              name: gitea-data
+      volumes:
+        - name: gitea-data
+          persistentVolumeClaim:
+            claimName: gitea-pv-claim
+      nodeSelector:
+        kubernetes.io/hostname: titan
+---
+kind: PersistentVolume
+apiVersion: v1
+metadata:
+  name: gitea-pv-volume
+  labels:
+    type: local
+    app: gitea
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 5Gi
+  accessModes:
+    - ReadWriteMany
+  hostPath:
+    path: "/var/lib/nfs-share/k8s/gitea/"
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: gitea-pv-claim
+  labels:
+    app: gitea
+spec:
+  storageClassName: manual
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 5Gi
+---
+# expose http for gitea
+apiVersion: v1  
+kind: Service
+metadata:
+  name: gitea-http-service
+spec:
+#  type: NodePort
+  ports:
+  - name: http
+    port: 3000
+#    targetPort: 3000
+#    nodePort: 30004
+  selector:
+    app: gitea
+---
+# expose ssh for gitea
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitea-ssh-service
+spec:
+  type: LoadBalancer
+  loadBalancerIP: 192.168.1.241 #gitssh.zircon.local
+  ports:
+  - name: ssh
+    port: 22
+  selector:
+    app: gitea
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: gitea
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`git.zircon.local`)
+      middlewares:
+        - name: https-only
+      kind: Rule
+      services:
+      - name: gitea-http-service
+        port: 3000
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: gitea-https
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`git.zircon.local`)
+      kind: Rule
+      services:
+      - name: gitea-http-service
+        port: 3000
+  tls:
+    secretName: zircon.local.certs 
